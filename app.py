@@ -5,8 +5,33 @@ import re
 
 
 def tratar_planilha(file, incoterm_valor):
-    # Carrega a planilha de origem ignorando o header original (linha 1)
+    # Carrega a planilha de origem mantendo a primeira linha como cabeçalho (header=0)
     df_origem = pd.read_excel(file, header=0)
+
+    # Remove espaços extras no início/fim dos nomes das colunas da origem para evitar erros de digitação
+    df_origem.columns = [str(col).strip() for col in df_origem.columns]
+
+    # --- DICIONÁRIO DE MAPEAMENTO (Cabeçalhos da Planilha de Origem) ---
+    C_PARTNUMBER = "CÓDIGO PRINCIPAL"
+    C_QUANTIDADE = "QUANTIDADE"
+    C_DESCRICAO = "DESCRICAO PORTUGUES"
+    C_PRECO_UNIT = "VALOR UNITARIO ITEM"
+    C_PESO_UNIT = "PESO LIQUIDO UNITÁRIO"
+    C_FATURA = "FATURA"
+    C_GTIN_EAN = "CODIGO(GTIN / EAN)"
+    C_ORDEM_COMPRA = "ORDEM DE COMPRA"
+
+    # Lista de colunas obrigatórias para verificar se a planilha de origem está correta
+    colunas_obrigatorias = [
+        C_PARTNUMBER, C_QUANTIDADE, C_DESCRICAO, C_PRECO_UNIT,
+        C_PESO_UNIT, C_FATURA, C_GTIN_EAN, C_ORDEM_COMPRA
+    ]
+
+    # Verifica se algum cabeçalho está faltando na planilha de origem antes de processar
+    colunas_faltantes = [col for col in colunas_obrigatorias if col not in df_origem.columns]
+    if colunas_faltantes:
+        raise ValueError(
+            f"Os seguintes cabeçalhos não foram encontrados na planilha de origem: {', '.join(colunas_faltantes)}")
 
     # Criando o DataFrame final com a estrutura exata solicitada (Case Sensitive)
     colunas_finais = [
@@ -15,16 +40,13 @@ def tratar_planilha(file, incoterm_valor):
     ]
     df_final = pd.DataFrame(columns=colunas_finais)
 
-    def col_idx(letra):
-        return ord(letra.upper()) - ord('A')
+    # A: PARTNUMBER ➔ "CÓDIGO PRINCIPAL"
+    df_final['PARTNUMBER'] = df_origem[C_PARTNUMBER]
 
-    # A: PARTNUMBER ➔ Origem A
-    df_final['PARTNUMBER'] = df_origem.iloc[:, col_idx('A')]
+    # B: QUANTIDADE ➔ "QUANTIDADE"
+    df_final['QUANTIDADE'] = df_origem[C_QUANTIDADE]
 
-    # B: QUANTIDADE ➔ Origem F
-    df_final['QUANTIDADE'] = df_origem.iloc[:, col_idx('F')]
-
-    # C: UNIDADE ➔ Lógica Tênis/Sapato/Mocassim
+    # C: UNIDADE ➔ Lógica Tênis/Sapato/Mocassim baseada em "DESCRICAO PORTUGUES"
     def verificar_unidade(valor):
         valor_str = str(valor).upper()
         palavras_pares = ["TENIS", "TÊNIS", "SAPATO", "MOCASSIM"]
@@ -32,15 +54,18 @@ def tratar_planilha(file, incoterm_valor):
             return "PARES"
         return "PECA"
 
-    df_final['UNIDADE'] = df_origem.iloc[:, col_idx('J')].apply(verificar_unidade)
+    df_final['UNIDADE'] = df_origem[C_DESCRICAO].apply(verificar_unidade)
 
-    # D: PRECOTOTAL ➔ K * F
-    df_final['PRECOTOTAL'] = pd.to_numeric(df_origem.iloc[:, col_idx('K')], errors='coerce') * pd.to_numeric(
-        df_origem.iloc[:, col_idx('F')], errors='coerce')
+    # Converte colunas numéricas de forma segura para evitar erros matemáticos
+    qtd_num = pd.to_numeric(df_origem[C_QUANTIDADE], errors='coerce').fillna(0)
+    preco_num = pd.to_numeric(df_origem[C_PRECO_UNIT], errors='coerce').fillna(0)
+    peso_num = pd.to_numeric(df_origem[C_PESO_UNIT], errors='coerce').fillna(0)
 
-    # E: PESOTOTAL ➔ G * F
-    df_final['PESOTOTAL'] = pd.to_numeric(df_origem.iloc[:, col_idx('G')], errors='coerce') * pd.to_numeric(
-        df_origem.iloc[:, col_idx('F')], errors='coerce')
+    # D: PRECOTOTAL ➔ "VALOR UNITARIO ITEM" * "QUANTIDADE"
+    df_final['PRECOTOTAL'] = preco_num * qtd_num
+
+    # E: PESOTOTAL ➔ "PESO LIQUIDO UNITÁRIO" * "QUANTIDADE"
+    df_final['PESOTOTAL'] = peso_num * qtd_num
 
     # F: INCOTERMS ➔ Valor da interface
     df_final['INCOTERMS'] = incoterm_valor
@@ -48,38 +73,34 @@ def tratar_planilha(file, incoterm_valor):
     # G: MOEDA ➔ Sempre '790'
     df_final['MOEDA'] = '790'
 
-    # H: FATURA ➔ Origem Q
-    df_final['FATURA'] = df_origem.iloc[:, col_idx('Q')]
+    # H: FATURA ➔ "FATURA"
+    df_final['FATURA'] = df_origem[C_FATURA]
 
-    # I: OUTRAS REFERENCIAS ➔ Origem Y (Tratado como Texto Puro para evitar o E+12)
+    # I: OUTRAS REFERENCIAS ➔ "CODIGO(GTIN / EAN)" (Tratado como Texto Puro)
     def limpar_referencia(valor):
         if pd.isna(valor): return ""
         val_str = str(valor).strip()
         if val_str.endswith('.0'): val_str = val_str[:-2]
         return val_str
 
-    df_final['OUTRAS REFERENCIAS'] = df_origem.iloc[:, col_idx('Y')].apply(limpar_referencia)
+    df_final['OUTRAS REFERENCIAS'] = df_origem[C_GTIN_EAN].apply(limpar_referencia)
 
-    # --- OPÇÃO B: REGRINHA DAS COLUNAS J E K COM REGEX (À prova de falhas de digitação) ---
+    # J e K: nrlote e expedicao ➔ Baseados em "ORDEM DE COMPRA" usando Regex
     def extrair_dados_regex(valor):
         val_str = str(valor).strip()
 
         # Procura por dois blocos de texto separados por qualquer tipo de barra (\ ou /)
-        # permitindo variações com ou sem espaços.
         match = re.search(r"([^\/\\]+)\s*[\/\\]+\s*([^\/\\]+)", val_str)
 
         if match:
-            # Pega o primeiro bloco, limpa espaços e captura os 6 primeiros caracteres
             parte_1 = match.group(1).strip()
             exp = parte_1[:6]
 
-            # Pega o segundo bloco, limpa espaços e captura os 3 últimos caracteres
             parte_2 = match.group(2).strip()
             lote = parte_2[-3:]
 
             return lote, exp
 
-        # Caso a célula não tenha o padrão esperado (ex: sem barras), tenta um split simples por segurança
         try:
             for sep in ["\\", "/"]:
                 if sep in val_str:
@@ -90,8 +111,8 @@ def tratar_planilha(file, incoterm_valor):
 
         return "", ""
 
-    # Aplicando a Opção B na coluna X da planilha de origem
-    dados_extraidos = df_origem.iloc[:, col_idx('X')].apply(extrair_dados_regex)
+    # Aplicando a extração baseada na coluna "ORDEM DE COMPRA"
+    dados_extraidos = df_origem[C_ORDEM_COMPRA].apply(extrair_dados_regex)
     df_final['nrlote'] = [d[0] for d in dados_extraidos]
     df_final['expedicao'] = [d[1] for d in dados_extraidos]
 
@@ -109,7 +130,7 @@ uploaded_file = st.file_uploader("Selecione o arquivo Excel de origem (.xlsx)", 
 if uploaded_file and incoterm_input:
     if st.button("Processar Planilha", use_container_width=True):
         try:
-            with st.spinner("Processando dados com a lógica de Regex..."):
+            with st.spinner("Processando dados pelos cabeçalhos..."):
                 resultado = tratar_planilha(uploaded_file, incoterm_input)
                 output = io.BytesIO()
 
@@ -119,7 +140,6 @@ if uploaded_file and incoterm_input:
                     worksheet = writer.sheets['Planilha Tratada']
 
                     # Força a formatação de texto puro do Excel nas colunas I, J e K (índices 8, 9, 10)
-                    # Isso garante que lotes numéricos ou referências longas não quebrem visualmente
                     fmt_txt = workbook.add_format({'num_format': '@'})
                     worksheet.set_column(8, 10, None, fmt_txt)
 
