@@ -64,8 +64,8 @@ def tratar_planilha(file, incoterm_valor):
     # D: PRECOTOTAL ➔ "VALOR UNITARIO ITEM" * "QUANTIDADE"
     df_final['PRECOTOTAL'] = preco_num * qtd_num
 
-    # E: PESOTOTAL ➔ "PESO LIQUIDO UNITÁRIO" * "QUANTIDADE"
-    df_final['PESOTOTAL'] = peso_num * qtd_num
+    # E: PESOTOTAL ➔ ("PESO LIQUIDO UNITÁRIO" * "QUANTIDADE") convertido de gramas para KG (/ 1000)
+    df_final['PESOTOTAL'] = (peso_num * qtd_num) / 1000
 
     # F: INCOTERMS ➔ Valor da interface
     df_final['INCOTERMS'] = incoterm_valor
