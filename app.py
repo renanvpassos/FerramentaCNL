@@ -49,7 +49,7 @@ def tratar_planilha(file, incoterm_valor):
     # C: UNIDADE ➔ Lógica Tênis/Sapato/Mocassim baseada em "DESCRICAO PORTUGUES"
     def verificar_unidade(valor):
         valor_str = str(valor).upper()
-        palavras_pares = ["TENIS", "TÊNIS", "SAPATO", "MOCASSIM"]
+        palavras_pares = ["TENIS", "TÊNIS", "SAPATO", "MOCASSIM", "SANDALIA"]
         if any(p in valor_str for p in palavras_pares):
             return "PARES"
         return "PECA"
