@@ -121,7 +121,7 @@ def tratar_planilha(file, incoterm_valor):
 
 # --- CONFIGURAÇÃO DA INTERFACE WEB (STREAMLIT) ---
 st.set_page_config(page_title="Tratador de Planilhas", layout="centered")
-st.title("Tratamento planilha Chanel")
+st.title("📂 Tratamento planilha Chanel")
 st.markdown("Insira os dados abaixo para gerar a nova planilha tratada.")
 
 incoterm_input = st.text_input("Informe o INCOTERMS:", placeholder="Ex: FOB, CIF, EXW...")
